@@ -1,5 +1,5 @@
 import express from "express";
-import { MongoClient } from "mongodb";
+import { MongoClient, ObjectId } from "mongodb";
 import cors from "cors";
 import "dotenv/config";
 
@@ -21,18 +21,32 @@ export async function connectToMongoDB() {
 }
 const Client = await connectToMongoDB();
 const db = Client.db("Pizzahub");
-const pizzaCollection = db.collection("user");
+const pizzaCollection = db.collection("menu");
 const pizzaBookingsCollection = db.collection("oder");
+const visibleToCustomers = {
+  approvalStatus: { $not: /^rejected$/i },
+  status: { $not: /^rejected$/i },
+};
 
-app.post("/menuItems", async (req, res) => {
-  const data = req.body;
-  const result = await pizzaCollection.insertOne(data)
+app.post("/menuItems", (req, res) => {
+  res.status(410).send({
+    error: "Submit menu items through the authenticated vendor workspace.",
+  });
+});
+
+app.get("/menuItems/:id", async (req, res) => {
+  const { id } = req.params;
+  const result = await pizzaCollection.findOne({
+    _id: new ObjectId(id),
+    ...visibleToCustomers,
+  });
   res.send(result);
 });
-app.get("/menuItems", async (req, res) =>{
-     const result = await pizzaCollection.find().toArray()
-     res.send(result)
-})
+
+app.get("/menuItems", async (req, res) => {
+  const result = await pizzaCollection.find(visibleToCustomers).toArray();
+  res.send(result);
+});
 
 app.get("/", (req, res) => {
   res.send({ msg: "PizzaHub....!!" });
