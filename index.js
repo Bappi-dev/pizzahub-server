@@ -120,8 +120,33 @@ app.get("/menuItems/:id", async (req, res) => {
 });
 
 app.get("/menuItems", async (req, res) => {
-  const result = await pizzaCollection.find(visibleToCustomers).toArray();
-  res.send(result);
+  const result = await pizzaCollection
+    .find({
+      ...visibleToCustomers,
+      name: { $type: "string", $ne: "" },
+      itemImage: { $type: "string", $ne: "" },
+      category: { $type: "string", $ne: "" },
+      location: { $type: "string", $ne: "" },
+      price: { $type: "number", $gt: 0 },
+    })
+    .sort({ createdAt: -1 })
+    .limit(6)
+    .toArray();
+
+  res.send(
+    result.map((item) => ({
+      _id: item._id.toString(),
+      name: item.name,
+      itemImage: item.itemImage,
+      category: item.category,
+      price: item.price,
+      location: item.location,
+      vendorName:
+        typeof item.vendorName === "string" && item.vendorName.trim()
+          ? item.vendorName.trim()
+          : "Local restaurant",
+    })),
+  );
 });
 
 app.get("/", (req, res) => {
