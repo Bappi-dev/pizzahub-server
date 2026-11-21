@@ -3,6 +3,7 @@ import { MongoClient, ObjectId } from "mongodb";
 import cors from "cors";
 import { betterAuth } from "better-auth";
 import { mongodbAdapter } from "@better-auth/mongo-adapter";
+import { jwt } from "better-auth/plugins";
 import "dotenv/config";
 
 const app = express();
@@ -34,6 +35,16 @@ const auth = betterAuth({
   database: mongodbAdapter(db, { client }),
   secret: process.env.BETTER_AUTH_SECRET,
   baseURL: process.env.BETTER_AUTH_URL ?? `http://localhost:${PORT}`,
+  plugins: [
+    jwt({
+      jwt: {
+        expirationTime: "5m",
+        issuer: "pizzahub-api",
+        audience: "pizzahub-api",
+        definePayload: ({ user }) => ({ role: user.role }),
+      },
+    }),
+  ],
   emailAndPassword: {
     enabled: true,
   },
@@ -57,52 +68,122 @@ const visibleToCustomers = {
   status: "active",
 };
 
-app.patch("/api/admin/users/:id", async (req, res) => {
+function getRequestHeaders(req) {
   const requestHeaders = new Headers();
   for (const [name, value] of Object.entries(req.headers)) {
     if (typeof value === "string") requestHeaders.set(name, value);
     else if (Array.isArray(value)) requestHeaders.set(name, value.join(", "));
   }
+  return requestHeaders;
+}
 
-  const session = await auth.api.getSession({ headers: requestHeaders });
-  if (!session) {
-    return res.status(401).send({ error: "Sign in to manage users." });
+async function requireSession(req, res, next) {
+  try {
+    const session = await auth.api.getSession({
+      headers: getRequestHeaders(req),
+    });
+    if (!session) {
+      return res.status(401).send({ error: "Sign in to get an access token." });
+    }
+
+    req.authSession = session;
+    return next();
+  } catch (error) {
+    return next(error);
   }
-  if (session.user.role !== "admin") {
-    return res.status(403).send({ error: "Only admins can manage users." });
+}
+
+async function verifyJwt(req, res, next) {
+  const authorization = req.get("authorization") ?? "";
+  const match = /^Bearer\s+(\S+)$/i.exec(authorization);
+  if (!match) {
+    return res.status(401).send({ error: "A valid Bearer JWT is required." });
   }
 
-  const { id } = req.params;
-  const { blocked } = req.body ?? {};
-  if (typeof blocked !== "boolean") {
-    return res.status(400).send({ error: "Choose Block or Unblock." });
-  }
-  if (id === session.user.id) {
-    return res
-      .status(409)
-      .send({ error: "You cannot block your own admin account." });
-  }
+  try {
+    const { payload } = await auth.api.verifyJWT({
+      body: { token: match[1] },
+    });
+    if (!payload || typeof payload.sub !== "string") {
+      return res.status(401).send({ error: "Invalid or expired JWT." });
+    }
+    const user = await db.collection("user").findOne({
+      $or: [
+        { _id: payload.sub },
+        { id: payload.sub },
+      ],
+    });
+    if (!user || user.blocked === true || user.banned === true) {
+      return res.status(403).send({ error: "This account is blocked." });
+    }
 
-  const identities = [{ _id: id }, { id }];
-  if (/^[\da-f]{24}$/i.test(id)) {
-    identities.push({ _id: new ObjectId(id) });
+    req.authSession = {
+      user: { id: payload.sub, role: payload.role },
+    };
+    return next();
+  } catch (error) {
+    return next(error);
   }
-  const updated = await db.collection("user").updateOne(
-    { $or: identities },
-    {
-      $set: {
-        blocked,
-        banned: blocked,
-        blockedAt: blocked ? new Date() : null,
-        updatedAt: new Date(),
-      },
-    },
-  );
-  if (!updated.matchedCount) {
-    return res.status(404).send({ error: "User not found." });
+}
+
+function requireRole(role) {
+  return (req, res, next) => {
+    if (req.authSession?.user.role !== role) {
+      return res.status(403).send({ error: "Only admins can manage users." });
+    }
+    return next();
+  };
+}
+
+app.get("/api/auth/token", requireSession, async (req, res, next) => {
+  try {
+    const { token } = await auth.api.getToken({
+      headers: getRequestHeaders(req),
+    });
+    return res.send({ token, tokenType: "Bearer", expiresIn: 300 });
+  } catch (error) {
+    return next(error);
   }
-  return res.send({ id, blocked });
 });
+
+app.patch(
+  "/api/admin/users/:id",
+  verifyJwt,
+  requireRole("admin"),
+  async (req, res) => {
+    const session = req.authSession;
+    const { id } = req.params;
+    const { blocked } = req.body ?? {};
+    if (typeof blocked !== "boolean") {
+      return res.status(400).send({ error: "Choose Block or Unblock." });
+    }
+    if (id === session.user.id) {
+      return res
+        .status(409)
+        .send({ error: "You cannot block your own admin account." });
+    }
+
+    const identities = [{ _id: id }, { id }];
+    if (/^[\da-f]{24}$/i.test(id)) {
+      identities.push({ _id: new ObjectId(id) });
+    }
+    const updated = await db.collection("user").updateOne(
+      { $or: identities },
+      {
+        $set: {
+          blocked,
+          banned: blocked,
+          blockedAt: blocked ? new Date() : null,
+          updatedAt: new Date(),
+        },
+      },
+    );
+    if (!updated.matchedCount) {
+      return res.status(404).send({ error: "User not found." });
+    }
+    return res.send({ id, blocked });
+  },
+);
 
 app.post("/menuItems", (req, res) => {
   res.status(410).send({
@@ -134,7 +215,13 @@ app.get("/menuItems", async (req, res) => {
     .toArray();
 
   res.send(
-    result.map((item) => ({
+    await Promise.all(result.map(async (item) => {
+      const vendor = typeof item.vendorId === "string"
+        ? await db.collection("user").findOne({
+            $or: [{ id: item.vendorId }, { _id: item.vendorId }],
+          })
+        : null;
+      return {
       _id: item._id.toString(),
       name: item.name,
       itemImage: item.itemImage,
@@ -145,6 +232,10 @@ app.get("/menuItems", async (req, res) => {
         typeof item.vendorName === "string" && item.vendorName.trim()
           ? item.vendorName.trim()
           : "Local restaurant",
+      premium:
+        vendor?.plan === "premium" ||
+        vendor?.subscriptionPlan === "premium",
+      };
     })),
   );
 });
