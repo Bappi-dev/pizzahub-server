@@ -45,4 +45,5 @@ tokens with `401`, blocked accounts with `403`, and insufficient roles with
 
 ## Live and repository links
 
+- Live server: `https://pizzahub-server-beige.vercel.app`
 - Server repository: `https://github.com/Bappi-dev/pizzahub-server`
