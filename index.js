@@ -93,38 +93,38 @@ async function requireSession(req, res, next) {
   }
 }
 
-async function verifyJwt(req, res, next) {
-  const authorization = req.get("authorization") ?? "";
-  const match = /^Bearer\s+(\S+)$/i.exec(authorization);
-  if (!match) {
-    return res.status(401).send({ error: "A valid Bearer JWT is required." });
-  }
+// async function verifyJwt(req, res, next) {
+//   const authorization = req.get("authorization") ?? "";
+//   const match = /^Bearer\s+(\S+)$/i.exec(authorization);
+//   if (!match) {
+//     return res.status(401).send({ error: "A valid Bearer JWT is required." });
+//   }
 
-  try {
-    const { payload } = await auth.api.verifyJWT({
-      body: { token: match[1] },
-    });
-    if (!payload || typeof payload.sub !== "string") {
-      return res.status(401).send({ error: "Invalid or expired JWT." });
-    }
-    const user = await db.collection("user").findOne({
-      $or: [
-        { _id: payload.sub },
-        { id: payload.sub },
-      ],
-    });
-    if (!user || user.blocked === true || user.banned === true) {
-      return res.status(403).send({ error: "This account is blocked." });
-    }
+//   try {
+//     const { payload } = await auth.api.verifyJWT({
+//       body: { token: match[1] },
+//     });
+//     if (!payload || typeof payload.sub !== "string") {
+//       return res.status(401).send({ error: "Invalid or expired JWT." });
+//     }
+//     const user = await db.collection("user").findOne({
+//       $or: [
+//         { _id: payload.sub },
+//         { id: payload.sub },
+//       ],
+//     });
+//     if (!user || user.blocked === true || user.banned === true) {
+//       return res.status(403).send({ error: "This account is blocked." });
+//     }
 
-    req.authSession = {
-      user: { id: payload.sub, role: payload.role },
-    };
-    return next();
-  } catch (error) {
-    return next(error);
-  }
-}
+//     req.authSession = {
+//       user: { id: payload.sub, role: payload.role },
+//     };
+//     return next();
+//   } catch (error) {
+//     return next(error);
+//   }
+// }
 
 function requireRole(role) {
   return (req, res, next) => {
