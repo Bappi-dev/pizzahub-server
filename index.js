@@ -243,6 +243,9 @@ app.get("/menuItems", async (req, res) => {
 app.get("/", (req, res) => {
   res.send({ msg: "PizzaHub....!!" });
 });
+app.delete("/pizza" , (req, res) =>{
+   console.log("pizza is my fecorate");
+})
 
 if (!process.env.VERCEL) {
   app.listen(PORT, () => {
