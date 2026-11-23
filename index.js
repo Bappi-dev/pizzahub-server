@@ -190,11 +190,7 @@ app.post("/menuItems", (req, res) => {
     error: "Submit menu items through the authenticated vendor workspace.",
   });
 });
-app.patch("/maneItems/:id ",async (req, res) =>{
-   const data = req.body
-   const result = await pizzaBookingsCollection.insertOne(data)
-   res.send(result)
-})
+
 
 app.get("/menuItems/:id", async (req, res) => {
   const { id } = req.params;
